@@ -1,0 +1,4 @@
+/.build/
+
+# swiftc tends to segfault
+/core
