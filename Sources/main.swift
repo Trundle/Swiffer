@@ -15,31 +15,84 @@ print(diff)
 
 enum Token {
     case Comment(String)
+    case StringLiteral(String)
+    case Text(String)
 }
 
 internal let _singleLineComment: Parser<String.UnicodeScalarView, Token> =
     { a in { b in Token.Comment(String(a + b)) } } <^> literal("//") <*> manyTill(anyChar, endOfLine)
 
 internal let _multiLineComment: Parser<String.UnicodeScalarView, Token> =
-    literal("/*") *> fix { recur in { stillOpen in
-        manyTill(anyChar, literal("*/")) >>- { (comment: String.UnicodeScalarView) in
-            var comment = comment + "*/".unicodeScalars
-            var nested = stillOpen
-            var prev: UnicodeScalar? = nil
-            for char in comment {
-                if char == "*" && prev == "/" {
-                    nested += 1
-                }
-                prev = char
+    balanced(anyChar, literal("/*"), literal("*/"))
+    <&> fix { recur in { (node: Nested<String.UnicodeScalarView>) in
+            switch node {
+            case let .Leaf(comment):
+                return "/*" + String(comment) + "*/"
+            case let .Branch(.Leaf(left), .Leaf(right)):
+                return "/*" + String(left) + "/*" + String(right) + "*/"
+            case let .Branch(l, .Leaf(tail)):
+                return recur(l) + String(tail) + "*/"
+            case let .Branch(.Leaf(head), r):
+                return "/*" + String(head) + recur(r)
+            default:
+                // Can't happen
+                return ""
             }
-            if (nested > 0) {
-                return { a in { a + $0 } } <^> pure(comment) <*> recur(stillOpen)
-            }
-            return pure(comment)
-        }
-    }}(0) <&> { (c: String.UnicodeScalarView) in Token.Comment("/*" + String(c)) }
+        }}
+    <&> { Token.Comment($0) }
 
 internal let comment: Parser<String.UnicodeScalarView, Token> =
     _singleLineComment <|> _multiLineComment
 
-print(parse(comment, "/* This is another \n comment /* nested /* Even more */ nested */ */".unicodeScalars))
+internal let string: Parser<String.UnicodeScalarView, Token> = {
+    let delimiter = literal("\"")
+    let inner =
+        literal("\\\\")
+        <|>  literal("\\\"")
+        <|> (anyChar <&> { String($0).unicodeScalars })
+    let m: Parser<String.UnicodeScalarView, [String.UnicodeScalarView]> =
+        manyTill(inner, delimiter)
+    let parser =
+        delimiter
+        *> (m <&> { x in x.reduce(String.UnicodeScalarView(), combine: +) })
+    return parser <&> { Token.StringLiteral(String($0)) }
+}()
+
+internal let text: Parser<String.UnicodeScalarView, Token> =
+    manyTill(anyChar, lookAhead(comment <|> string)) <&> { Token.Text(String($0)) }
+
+internal let tokens: Parser<String.UnicodeScalarView, [Token]> =
+    many(skipSpaces *> (comment <|> string <|> text))
+
+internal func tokenize(_ input: String) -> [Token] {
+    switch parse(tokens, input.unicodeScalars) {
+    case .Left:
+        return []
+    case let .Right(remainingInput, tokens):
+        return tokens + (remainingInput.isEmpty ? [] : [Token.Text(String(remainingInput))])
+    }
+}
+
+
+/* Some /* nested comment */ just /* for the */ lulz */
+
+print(tokenize("/* Simple comment */"))
+print(tokenize("/* Some /* nested comment */ just /* for the */ lulz */"))
+print(tokenize("/* Some /* nested comment */ just lulz */"))
+print(tokenize("/* Some /* nested /* and more nested */ comment */ just lulz */"))
+print(tokenize("/* Some /* nested /* and more nested */ comment */*/"))
+
+let p: Parser<String.UnicodeScalarView, Nested<String.UnicodeScalarView>> =
+    balanced(anyChar, literal("/*"), literal("*/"))
+print(parse(p, "/* /* Nested */ comment */".unicodeScalars))
+
+var input = ""
+var line: String? = nil
+repeat {
+    line = readLine(strippingNewline: false)
+    if line != nil {
+       input += line!
+    }
+} while line != nil
+
+// XXX print(tokenize(input))

@@ -1,6 +1,7 @@
 // Part of this code is taken from TryParsec by Yasuhiro Inami, released under a MIT license
 // Copyright (c) 2016 Yasuhiro Inami
-
+//
+// See also https://github.com/inhabitedtype/angstrom
 
 /// The parser framework to implement the parsers for the micro-grammars
 
@@ -10,6 +11,7 @@ infix operator <&>  { associativity left precedence 140 }
 infix operator <|>  { associativity right precedence 130 }
 infix operator <*>  { associativity left precedence 140 }
 infix operator *>   { associativity left precedence 140 }
+infix operator <*   { associativity left precedence 140 }
 
 
 /// Represents values with two possibilities:either `Left LeftType` or `Right RightType`.
@@ -86,6 +88,11 @@ public func *> <In, Out1, Out2>(p: Parser<In, Out1>, q: @autoclosure(escaping) (
     return const(id) <^> p <*> q
 }
 
+/// Sequence actions, discarding right (value of the second argument).
+public func <* <In, Out1, Out2>(p: Parser<In, Out1>, q: @autoclosure(escaping) () -> Parser<In, Out2>) -> Parser<In, Out1> {
+    return const <^> p <*> q
+}
+
 extension Collection {
     /// Extracts head and tail of `Collection`, returning nil if it is empty.
     internal func uncons() -> (Iterator.Element, SubSequence)? {
@@ -106,6 +113,23 @@ public func satisfy(_ predicate: (UnicodeScalar) -> Bool) -> Parser<String.Unico
             return .Left(input, "did not satisfy predicate")
         }
     }
+}
+
+/// Parses zero or more occurrences of `p`.
+/// - Note: The returned parser never fails.
+public func many<In, Out, Outs: RangeReplaceableCollection where Outs.Iterator.Element == Out>(_ p: Parser<In, Out>) -> Parser<In, Outs> {
+    return many1(p) <|> pure(Outs())
+}
+
+/// Parses one or more occurrences of `p`.
+public func many1<In, Out, Outs: RangeReplaceableCollection where Outs.Iterator.Element == Out>(_ p: Parser<In, Out>) -> Parser<In, Outs> {
+    let insert: (Out) -> (Outs) -> Outs = { x in { xs in
+        // XXX improve (copies a lot I think)
+        var xs = xs
+        xs.insert(x, at: xs.startIndex)
+        return xs
+    }}
+    return insert <^> p <*> many(p)
 }
 
 /// Parses one or more occurrences of `p` until `end` succeeds,
@@ -185,4 +209,41 @@ public func lookAhead<In, Out>(_ p: Parser<In, Out>) -> Parser<In, Out> {
                 return .Right(input, output)
         }
     }
+}
+
+/// Parses `open`, followed by `p` and `close`. Returns the value returned by `p`.
+public func between<In, Out1, Out2, Out>(
+    _ p: Parser<In, Out>,
+    _ open: Parser<In, Out1>,
+    _ close: Parser<In, Out2>
+) -> Parser<In, Out> {
+    return open *> p <* close
+}
+
+public enum Nested<Out> {
+    indirect case Branch(Nested<Out>, Nested<Out>)
+    case Leaf(Out)
+}
+
+/// Returns a parser that matches the same as `p`, but returns `()` and doesn't consume any input.
+internal func _matchAndDiscard<In, Out>(_ p: Parser<In, Out>) -> Parser<In, ()> {
+    return lookAhead(p) <&> const(())
+}
+
+/// Parses `open`, then zero or more occurrences of `p` and then `close`.
+/// This sequence can be nested, as long as the occurrences of `open` and `closed` are balanced.
+public func balanced<In, Out, OutOpen, OutClose,
+                     Outs: RangeReplaceableCollection where Outs.Iterator.Element == Out>(
+    _ p: Parser<In, Out>,
+    _ open: Parser<In, OutOpen>,
+    _ close: Parser<In, OutClose>
+) -> Parser<In, Nested<Outs>> {
+    return open *> fix { recur in {
+        manyTill(p, _matchAndDiscard(open) <|> _matchAndDiscard(close))
+        >>- { match in
+                close <&> const(.Leaf(match))
+                <|> open *> ({ left in { right in .Branch(.Leaf(match), .Branch(left, right)) } }
+                             <^> recur() <*> recur())
+                }
+    }}()
 }
