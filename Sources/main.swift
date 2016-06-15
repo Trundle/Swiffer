@@ -74,18 +74,6 @@ internal func tokenize(_ input: String) -> [Token] {
 }
 
 
-/* Some /* nested comment */ just /* for the */ lulz */
-
-print(tokenize("/* Simple comment */"))
-print(tokenize("/* Some /* nested comment */ just /* for the */ lulz */"))
-print(tokenize("/* Some /* nested comment */ just lulz */"))
-print(tokenize("/* Some /* nested /* and more nested */ comment */ just lulz */"))
-print(tokenize("/* Some /* nested /* and more nested */ comment */*/"))
-
-let p: Parser<String.UnicodeScalarView, Nested<String.UnicodeScalarView>> =
-    balanced(anyChar, literal("/*"), literal("*/"))
-print(parse(p, "/* /* Nested */ comment */".unicodeScalars))
-
 var input = ""
 var line: String? = nil
 repeat {
@@ -95,4 +83,8 @@ repeat {
     }
 } while line != nil
 
-// XXX print(tokenize(input))
+let tokenizedInput = tokenize(input)
+let undocumented = publicFunctionsAreDocumented(tokenizedInput)
+if !undocumented.isEmpty {
+    print(":sadpanda: The following functions are undocumented: " + undocumented.joined(separator: ", "))
+}
