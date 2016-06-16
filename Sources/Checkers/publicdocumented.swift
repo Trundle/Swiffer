@@ -2,6 +2,9 @@
 
 import Foundation
 
+import Core
+
+
 internal func pairwise<C: Collection>(_ c: C) -> Zip2Sequence<C, C.SubSequence> {
     return zip(c, c.dropFirst())
 }
@@ -46,7 +49,7 @@ private func textToken(_ token: Token) -> String? {
     }
 }
 
-internal func publicFunctionsAreDocumented(_ tokens: [Token]) -> [String] {
+public func publicFunctionsAreDocumented(_ tokens: [Token]) -> [String] {
     var documented = 0
     var undocumented: [String] = []
     for (prev, token) in pairwise(tokens) {
