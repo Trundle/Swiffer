@@ -220,9 +220,10 @@ public func between<In, Out1, Out2, Out>(
     return open *> p <* close
 }
 
-public enum Nested<Out> {
-    indirect case Branch(Nested<Out>, Nested<Out>)
-    case Leaf(Out)
+public enum Nested<O, I, C> {
+    case Open(O)
+    case Inner(I)
+    case Close(C)
 }
 
 /// Returns a parser that matches the same as `p`, but returns `()` and doesn't consume any input.
@@ -237,13 +238,13 @@ public func balanced<In, Out, OutOpen, OutClose,
     _ p: Parser<In, Out>,
     _ open: Parser<In, OutOpen>,
     _ close: Parser<In, OutClose>
-) -> Parser<In, Nested<Outs>> {
-    return open *> fix { recur in {
-        manyTill(p, _matchAndDiscard(open) <|> _matchAndDiscard(close))
-        >>- { match in
-                close <&> const(.Leaf(match))
-                <|> open *> ({ left in { right in .Branch(.Leaf(match), .Branch(left, right)) } }
-                             <^> recur() <*> recur())
-                }
+) -> Parser<In, [Nested<OutOpen, Outs, OutClose>]> {
+    return { o in { [.Open(o)] + $0 } }
+        <^> open <*> fix { (recur: () -> Parser<In, [Nested<OutOpen, Outs, OutClose>]>)
+                            -> () -> Parser<In, [Nested<OutOpen, Outs, OutClose>]> in {
+        close <&> { [.Close($0)] }
+        <|> { o in { i in { [.Open(o)] + i + $0 } } } <^> open <*> recur() <*> recur()
+        <|> { i in { [.Inner(i)] + $0 } }
+            <^> manyTill(p, _matchAndDiscard(open) <|> _matchAndDiscard(close)) <*> recur()
     }}()
 }

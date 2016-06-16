@@ -1,7 +1,20 @@
-public enum Token {
+public enum Token: Equatable {
     case Comment(String)
     case StringLiteral(String)
     case Text(String)
+}
+
+public func ==(lhs: Token, rhs: Token) -> Bool {
+    switch (lhs, rhs) {
+    case let (.Comment(l), .Comment(r)):
+        return l == r
+    case let (.StringLiteral(l), .StringLiteral(r)):
+        return l == r
+    case let (.Text(l), .Text(r)):
+        return l == r
+    default:
+        return false
+    }
 }
 
 private let _singleLineComment: Parser<String.UnicodeScalarView, Token> =
@@ -9,21 +22,20 @@ private let _singleLineComment: Parser<String.UnicodeScalarView, Token> =
 
 private let _multiLineComment: Parser<String.UnicodeScalarView, Token> =
     balanced(anyChar, literal("/*"), literal("*/"))
-    <&> fix { recur in { (node: Nested<String.UnicodeScalarView>) in
-            switch node {
-            case let .Leaf(comment):
-                return "/*" + String(comment) + "*/"
-            case let .Branch(.Leaf(left), .Leaf(right)):
-                return "/*" + String(left) + "/*" + String(right) + "*/"
-            case let .Branch(l, .Leaf(tail)):
-                return recur(l) + String(tail) + "*/"
-            case let .Branch(.Leaf(head), r):
-                return "/*" + String(head) + recur(r)
-            default:
-                // Can't happen
-                return ""
-            }
-        }}
+    <&> { (parts: [Nested<String.UnicodeScalarView,
+                          String.UnicodeScalarView,
+                          String.UnicodeScalarView>]) in
+            parts.map {
+                switch $0 {
+                    case .Open:
+                        return "/*"
+                    case .Close:
+                        return "*/"
+                    case let .Inner(i):
+                        return String(i)
+                }
+            }.joined(separator: "")
+        }
     <&> { Token.Comment($0) }
 
 private let comment: Parser<String.UnicodeScalarView, Token> =
